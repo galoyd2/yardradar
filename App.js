@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from './firebaseConfig'; // ✅ used directly now
+import { auth } from './firebaseConfig';
 
 import HomeScreen from './screens/HomeScreen';
 import PostSaleScreen from './screens/PostSaleScreen';
 import FindSalesScreen from './screens/FindSalesScreen';
+import MyListingsScreen from './screens/MyListingsScreen';
 import AuthScreen from './screens/AuthScreen';
 
 const Stack = createNativeStackNavigator();
@@ -17,12 +17,12 @@ export default function App() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
       setUser(currentUser);
       setChecking(false);
     });
 
-    return () => unsubscribe();
+    return unsubscribe;
   }, []);
 
   if (checking) {
@@ -41,8 +41,15 @@ export default function App() {
         ) : (
           <>
             <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="Post Sale" component={PostSaleScreen} />
+            <Stack.Screen
+              name="Post Sale"
+              component={PostSaleScreen}
+              options={{
+                title: 'List a Sale',
+                presentation: 'modal', // This change should fix the dropdown clipping issue
+              }} />
             <Stack.Screen name="Find Sales" component={FindSalesScreen} />
+            <Stack.Screen name="My Listings" component={MyListingsScreen} />
           </>
         )}
       </Stack.Navigator>

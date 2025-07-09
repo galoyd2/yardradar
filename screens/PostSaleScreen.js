@@ -1,229 +1,346 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Dimensions, Image, Alert } from 'react-native';
-import MapView, { Marker, Callout } from 'react-native-maps';
-import * as Location from 'expo-location';
-import * as ImagePicker from 'expo-image-picker';
-import { collection, addDoc, getDocs } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../firebaseConfig';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  View,
+  Text,
+  TextInput,
+  Button,
+  StyleSheet,
+  Alert,
+  Platform,
+  ActivityIndicator,
+  TouchableOpacity,
+  FlatList,
+} from 'react-native';
+import {
+  collection,
+  addDoc,
+  doc,
+  updateDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { auth, db } from '../firebaseConfig';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import { GOOGLE_MAPS_API_KEY } from '@env';
+import axios from 'axios';
 
-export default function PostSaleScreen() {
-  const [location, setLocation] = useState(null);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [sales, setSales] = useState([]);
-  const [image, setImage] = useState(null);
-  const [uploading, setUploading] = useState(false);
+console.log('Google Maps Key:', GOOGLE_MAPS_API_KEY);
+
+export default function PostSaleScreen({ navigation, route }) {
+  const { editData } = route.params || {};
+  const isEditMode = !!editData;
+
+  // If editing, use the saleTimestamp from Firestore, otherwise use the current date.
+  // The .toDate() method converts a Firestore Timestamp to a JS Date object.
+  const initialSaleDate = editData?.saleTimestamp ? editData.saleTimestamp.toDate() : new Date();
+
+  const [saleDetails, setSaleDetails] = useState({
+    title: editData?.title || '',
+    description: editData?.description || '',
+    location: editData?.location || '',
+    date: initialSaleDate,
+    time: initialSaleDate,
+    coordinates: editData?.coordinates || null,
+  });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (!user) {
-        Alert.alert('Authentication Required', 'You must be logged in to post a sale.');
-      }
+    navigation.setOptions({
+      title: isEditMode ? 'Edit Sale' : 'Post a Sale',
     });
-    return unsubscribe;
-  }, []);
+  }, [navigation, isEditMode]);
 
   useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission denied', 'Location permission is required.');
-        return;
+    const testGooglePlacesAPI = async () => {
+      try {
+        const res = await axios.get(
+          `https://maps.googleapis.com/maps/api/place/autocomplete/json`,
+          {
+            params: {
+              input: '123 Main St',
+              key: GOOGLE_MAPS_API_KEY,
+              types: 'address',
+              language: 'en',
+            },
+          }
+        );
+        console.log('✅ Google Places test:', res.data);
+        if (res.data.error_message) {
+          console.warn('⚠️ Google API error:', res.data.error_message);
+        }
+      } catch (error) {
+        console.error('❌ Axios error:', error.message);
       }
-
-      const loc = await Location.getCurrentPositionAsync({});
-      setLocation(loc.coords);
-    })();
-  }, []);
-
-  useEffect(() => {
-    const loadSales = async () => {
-      const snapshot = await getDocs(collection(db, 'sales'));
-      const loadedSales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSales(loadedSales);
     };
 
-    loadSales();
+    testGooglePlacesAPI();
   }, []);
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-      allowsEditing: true,
-    });
-
-    if (!result.canceled && result.assets?.length > 0) {
-      setImage(result.assets[0].uri);
-    }
-  };
-
-  const uploadImageAsync = async (uri) => {
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    const filename = `yard_sales/${uuidv4()}`;
-    const storageRef = ref(storage, filename);
-    await uploadBytes(storageRef, blob);
-    return await getDownloadURL(storageRef);
-  };
-
-  const postSale = async () => {
-    const user = auth.currentUser;
-
-    if (!user) {
-      Alert.alert('Login Required', 'Please log in to post a sale.');
-      return;
-    }
-
-    if (!title || !description || !location) {
-      Alert.alert('Missing Info', 'Please fill out all fields.');
-      return;
-    }
-
+  const searchAddresses = async (input) => {
     try {
-      setUploading(true);
+      const response = await axios.get(
+        `https://maps.googleapis.com/maps/api/place/autocomplete/json`,
+        {
+          params: {
+            input: input,
+            key: GOOGLE_MAPS_API_KEY,
+            types: 'address',
+            language: 'en',
+          },
+        }
+      );
+      
+      if (response.data.status === 'OK') {
+        setAddressSuggestions(response.data.predictions);
+      } else {
+        console.warn('Places API error:', response.data.status);
+        setAddressSuggestions([]);
+      }
+    } catch (error) {
+      console.error('Address search error:', error);
+      setAddressSuggestions([]);
+    }
+  };
 
-      let imageUrl = '';
-      if (image) {
-        imageUrl = await uploadImageAsync(image);
+  const selectAddress = async (suggestion) => {
+    try {
+      // Get place details including coordinates
+      const detailsResponse = await axios.get(
+        `https://maps.googleapis.com/maps/api/place/details/json`,
+        {
+          params: {
+            place_id: suggestion.place_id,
+            fields: 'geometry,formatted_address',
+            key: GOOGLE_MAPS_API_KEY,
+          },
+        }
+      );
+
+      if (detailsResponse.data.status === 'OK') {
+        const place = detailsResponse.data.result;
+        setSaleDetails(prev => ({
+          ...prev,
+          location: suggestion.description,
+          coordinates: {
+            latitude: place.geometry.location.lat,
+            longitude: place.geometry.location.lng,
+          },
+        }));
+      }
+    } catch (error) {
+      console.error('Place details error:', error);
+      // Still set the location even if we can't get coordinates
+      setSaleDetails(prev => ({
+        ...prev,
+        location: suggestion.description,
+      }));
+    }
+    
+    setAddressSuggestions([]);
+  };
+
+  const handleSave = async () => {
+    // De-structure for easier access and add trim() to title check
+    const { title, location, coordinates } = saleDetails;
+
+    // More specific validation checks for better user feedback
+    if (!title.trim()) {
+      Alert.alert('Missing Title', 'Please provide a title for your sale.');
+      return;
+    }
+
+    if (!location || !coordinates) {
+      Alert.alert(
+        'Invalid Address',
+        'Please type an address and select a valid option from the dropdown list to confirm the location.'
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Combine the date and time into a single JavaScript Date object.
+      const combinedDateTime = new Date(saleDetails.date);
+      combinedDateTime.setHours(saleDetails.time.getHours(), saleDetails.time.getMinutes(), 0, 0);
+
+      const saleData = {
+        title: title.trim(),
+        description: saleDetails.description,
+        location: location,
+        // Store as a single timestamp for easier querying and sorting in Firestore.
+        saleTimestamp: combinedDateTime,
+        coordinates: coordinates,
+        hasCoordinates: true,
+        userId: auth.currentUser?.uid || null,
+      };
+
+      if (isEditMode) {
+        const saleDocRef = doc(db, 'sales', editData.id);
+        await updateDoc(saleDocRef, saleData);
+        Alert.alert('Success', 'Sale updated!');
+      } else {
+        await addDoc(collection(db, 'sales'), {
+          ...saleData,
+          createdAt: serverTimestamp(),
+        });
+        Alert.alert('Success', 'Sale posted!');
       }
 
-      await addDoc(collection(db, 'sales'), {
-        title,
-        description,
-        location,
-        imageUrl,
-        userId: user.uid,
-        date: new Date().toISOString(),
-      });
-
-      Alert.alert('Success', 'Yard sale posted!');
-      setTitle('');
-      setDescription('');
-      setImage(null);
-
-      const snapshot = await getDocs(collection(db, 'sales'));
-      const updated = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSales(updated);
+      navigation.goBack();
     } catch (err) {
-      console.error('Upload error:', err);
-      Alert.alert('Upload Error', 'Something went wrong.');
+      console.error('Error saving sale:', err);
+      Alert.alert('Error', `Failed to ${isEditMode ? 'update' : 'post'} sale. Please try again.`);
     } finally {
-      setUploading(false);
+      setIsSaving(false);
     }
   };
 
-  return (
+  // Create a single item array for FlatList
+  const formData = [{ key: 'form' }];
+
+  const renderFormContent = () => (
     <View style={styles.container}>
-      {location ? (
-        <MapView
-          style={styles.map}
-          initialRegion={{
-            latitude: location.latitude,
-            longitude: location.longitude,
-            latitudeDelta: 0.03,
-            longitudeDelta: 0.03,
+      <Text style={styles.label}>Title *</Text>
+      <TextInput
+        style={styles.input}
+        value={saleDetails.title}
+        onChangeText={(text) => setSaleDetails(prev => ({ ...prev, title: text }))}
+        placeholder="e.g., Neighborhood Garage Sale"
+      />
+
+      <Text style={styles.label}>Description</Text>
+      <TextInput
+        style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+        value={saleDetails.description}
+        onChangeText={(text) => setSaleDetails(prev => ({ ...prev, description: text }))}
+        multiline
+        placeholder="e.g., Furniture, clothes, and toys"
+      />
+
+      {/* Custom Google Places implementation */}
+      <View style={{ zIndex: 1000, position: 'relative', marginBottom: 200 }}>
+        <Text style={styles.label}>Address *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter address"
+          value={saleDetails.location}
+          onChangeText={(text) => {
+            setSaleDetails(prev => ({ ...prev, location: text }));
+            if (text.length > 2) {
+              searchAddresses(text);
+            } else {
+              setAddressSuggestions([]);
+            }
           }}
-        >
-          <Marker coordinate={location} pinColor="blue">
-            <Callout><Text>You are here</Text></Callout>
-          </Marker>
-
-          {sales.map((sale) => {
-            if (!sale.location || !sale.location.latitude || !sale.location.longitude) return null;
-
-            return (
-              <Marker
-                key={sale.id}
-                coordinate={{
-                  latitude: sale.location.latitude,
-                  longitude: sale.location.longitude,
+        />
+        
+        {addressSuggestions.length > 0 && (
+          <View style={{
+            position: 'absolute',
+            top: 100,
+            left: 0,
+            right: 0,
+            backgroundColor: 'white',
+            borderWidth: 1,
+            borderColor: '#ccc',
+            borderRadius: 10,
+            maxHeight: 200,
+            zIndex: 1000,
+            elevation: 1000,
+          }}>
+            {addressSuggestions.map((suggestion, index) => (
+              <TouchableOpacity
+                key={index}
+                style={{
+                  padding: 15,
+                  borderBottomWidth: index < addressSuggestions.length - 1 ? 1 : 0,
+                  borderBottomColor: '#eee',
                 }}
-                title={sale.title}
+                onPress={() => selectAddress(suggestion)}
               >
-                <Callout>
-                  <View style={{ maxWidth: 250 }}>
-                    <Text style={{ fontWeight: 'bold' }}>{sale.title}</Text>
-                    <Text>{sale.description}</Text>
-                    {sale.imageUrl && (
-                      <Image
-                        source={{ uri: sale.imageUrl }}
-                        style={{ width: 200, height: 100, marginTop: 5, borderRadius: 5 }}
-                      />
-                    )}
-                    <Text style={{ fontSize: 10, color: '#888' }}>
-                      {new Date(sale.date).toLocaleString()}
-                    </Text>
-                  </View>
-                </Callout>
-              </Marker>
-            );
-          })}
-        </MapView>
-      ) : (
-        <Text style={styles.loading}>Loading map...</Text>
+                <Text>{suggestion.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+
+      <Text style={styles.label}>Date *</Text>
+      <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.input}>
+        <Text>{saleDetails.date.toDateString()}</Text>
+      </TouchableOpacity>
+      {showDatePicker && (
+        <DateTimePicker
+          value={saleDetails.date}
+          mode="date"
+          display="default"
+          onChange={(event, selectedDate) => {
+            setShowDatePicker(Platform.OS === 'ios');
+            if (selectedDate) setSaleDetails(prev => ({ ...prev, date: selectedDate }));
+          }}
+        />
       )}
 
-      <View style={styles.form}>
-        <TextInput
-          placeholder="Sale Title"
-          value={title}
-          onChangeText={setTitle}
-          style={styles.input}
+      <Text style={styles.label}>Time *</Text>
+      <TouchableOpacity onPress={() => setShowTimePicker(true)} style={styles.input}>
+        <Text>{saleDetails.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+      </TouchableOpacity>
+      {showTimePicker && (
+        <DateTimePicker
+          value={saleDetails.time}
+          mode="time"
+          display="default"
+          onChange={(event, selectedTime) => {
+            setShowTimePicker(Platform.OS === 'ios');
+            if (selectedTime) setSaleDetails(prev => ({ ...prev, time: selectedTime }));
+          }}
         />
-        <TextInput
-          placeholder="Description"
-          value={description}
-          onChangeText={setDescription}
-          style={styles.input}
-        />
-        <Button title="📸 Pick an Image" onPress={pickImage} />
-        {image && <Image source={{ uri: image }} style={styles.preview} />}
-        <View style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden' }}>
+      )}
+
+      <View style={{ marginTop: 30, marginBottom: 20 }}>
+        {isSaving ? (
+          <ActivityIndicator size="large" color="#007AFF" />
+        ) : (
           <Button
-            title={uploading ? 'Uploading...' : 'Post Yard Sale'}
-            onPress={postSale}
-            disabled={uploading}
+            title={isEditMode ? 'Update Sale' : 'Post Sale'}
+            onPress={handleSave}
           />
-        </View>
+        )}
       </View>
     </View>
+  );
+  
+  return (
+    <FlatList
+      data={formData}
+      renderItem={renderFormContent}
+      keyExtractor={(item) => item.key}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      showsVerticalScrollIndicator={false}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  map: {
-    width: '100%',
-    height: Dimensions.get('window').height / 2,
-  },
-  form: {
+  container: {
     padding: 20,
-    backgroundColor: '#f9f9f9',
+    paddingBottom: 40, // Add padding to the bottom for better scrolling
   },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  errorText: { textAlign: 'center', fontSize: 16, color: 'red', marginBottom: 10 },
+  label: { fontSize: 16, fontWeight: 'bold', marginTop: 15, marginBottom: 6 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
+    padding: 14,
     fontSize: 16,
-    marginVertical: 10,
     borderRadius: 10,
     backgroundColor: '#fff',
-  },
-  preview: {
-    width: '100%',
-    height: 150,
-    marginVertical: 10,
-    borderRadius: 10,
-  },
-  loading: {
-    flex: 1,
     justifyContent: 'center',
-    textAlign: 'center',
-    paddingTop: 40,
-    fontSize: 18,
+    minHeight: 50,
   },
 });

@@ -1,102 +1,329 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, Alert } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  FlatList,
+  TouchableOpacity,
+  Alert,
+  RefreshControl,
+} from 'react-native';
 import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { collection, getDocs } from 'firebase/firestore';
+import { Ionicons } from '@expo/vector-icons';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
 export default function FindSalesScreen() {
-  const [location, setLocation] = useState(null);
   const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const mapRef = useRef(null);
+  const markerRefs = useRef({});
+  const [initialRegion, setInitialRegion] = useState(null);
+  const [userLocation, setUserLocation] = useState(null);
+  const [selectedSaleId, setSelectedSaleId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', 'weekend'
 
   useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+    let isMounted = true;
+
+    const setupScreen = async () => {
+      // Request location permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission denied', 'Location access is required.');
-        return;
+        Alert.alert('Permission Denied', 'Location access is needed to show sales near you.');
+        if (isMounted) {
+          setInitialRegion({
+            latitude: 37.0902,
+            longitude: -95.7129,
+            latitudeDelta: 30,
+            longitudeDelta: 30,
+          });
+        }
+      } else {
+        const location = await Location.getCurrentPositionAsync({});
+        const region = {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          latitudeDelta: 0.5, // Zoom in closer
+          longitudeDelta: 0.5,
+        };
+        if (isMounted) {
+          setInitialRegion(region);
+          setUserLocation(region);
+        }
       }
 
-      const loc = await Location.getCurrentPositionAsync({});
-      setLocation(loc.coords);
-    })();
-  }, []);
-
-  useEffect(() => {
-    const fetchSales = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'sales'));
-        const loaded = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setSales(loaded);
-      } catch (error) {
-        console.error('Error loading sales:', error);
-      }
+      fetchSales();
     };
 
-    fetchSales();
+    setupScreen();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  // This function is wrapped in useCallback to prevent it from being recreated on every render,
+  // which would cause an infinite loop in the useEffect that depends on it.
+  // Fixed fetchSales function
+    const fetchSales = useCallback(async () => {
+    setLoading(true);
+    try {
+      const salesRef = collection(db, 'sales');
+      const q = query(salesRef, where('hasCoordinates', '==', true));
+      
+      const snapshot = await getDocs(q);
+      let salesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Filter in JavaScript instead of Firestore
+      if (dateFilter === 'today') {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        
+        salesData = salesData.filter(sale => {
+          if (!sale.saleTimestamp) return false;
+          const saleDate = sale.saleTimestamp.toDate();
+          return saleDate >= start && saleDate < end;
+        });
+      }
+      
+      setSales(salesData);
+    } catch (err) {
+      console.error('Error fetching sales:', err);
+      Alert.alert('Error', 'Could not fetch sales data.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [dateFilter]);
+
+  // Refetch sales when the date filter changes
+  useEffect(() => {
+    // Only fetch if the initial location has been determined
+    if (initialRegion) {
+      fetchSales();
+    }
+  }, [fetchSales, initialRegion]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchSales();
+  };
+
+  const handleListItemPress = (item) => {
+    if (mapRef.current && item.coordinates) {
+      mapRef.current.animateToRegion(
+        {
+          ...item.coordinates,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        },
+        1000 // Animate over 1 second
+      );
+
+      setSelectedSaleId(item.id);
+
+      const marker = markerRefs.current[item.id];
+      if (marker) {
+        // A short delay can help ensure the map has moved before showing the callout
+        setTimeout(() => marker.showCallout(), 1000);
+      }
+    }
+  };
+
+  const handleMapPress = () => {
+    // Deselect marker when map is pressed
+    setSelectedSaleId(null);
+  };
+
+  const reCenterMap = () => {
+    if (mapRef.current && userLocation) {
+      mapRef.current.animateToRegion(userLocation, 1000);
+    } else {
+      Alert.alert("Location not available", "Could not get your current location.");
+    }
+  };
+
+  if (loading || !initialRegion) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Finding sales near you...</Text>
+      </View>
+    );
+  }
+
+  const renderSaleItem = ({ item }) => {
+    const saleDate = item.saleTimestamp?.toDate();
+    const dateString = saleDate ? saleDate.toLocaleDateString() : 'Date not set';
+    const timeString = saleDate ? saleDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Time not set';
+
+    return (
+      <TouchableOpacity onPress={() => handleListItemPress(item)}>
+        <View style={styles.listItem}>
+          <Text style={styles.title}>{item.title}</Text>
+          <Text style={styles.text}>📍 {item.location}</Text>
+          <Text style={styles.text}>📅 {dateString}</Text>
+          <Text style={styles.text}>🕒 {timeString}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      {location ? (
-        <MapView
-          style={styles.map}
-          initialRegion={{
-            latitude: location.latitude,
-            longitude: location.longitude,
-            latitudeDelta: 0.03,
-            longitudeDelta: 0.03,
-          }}
-        >
-          {/* User location marker */}
-          <Marker coordinate={location} pinColor="blue">
-            <Callout><Text>You are here</Text></Callout>
-          </Marker>
+      <View style={styles.filterContainer}>
+        <TouchableOpacity
+          style={[styles.filterButton, dateFilter === 'all' && styles.activeFilter]}
+          onPress={() => setDateFilter('all')}>
+          <Text style={styles.filterText}>All Sales</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, dateFilter === 'today' && styles.activeFilter]}
+          onPress={() => setDateFilter('today')}>
+          <Text style={styles.filterText}>Today</Text>
+        </TouchableOpacity>
+        {/* Add a "This Weekend" button here with its own logic */}
+      </View>
 
-          {/* Yard sale markers */}
-          {sales.map((sale) => {
-            if (!sale.location || !sale.location.latitude || !sale.location.longitude) return null;
+      <MapView
+        style={styles.map}
+        ref={mapRef}
+        initialRegion={initialRegion}
+        showsUserLocation={true}
+        onPress={handleMapPress}
+      >
+        {sales.map((sale) => {
+          const saleDate = sale.saleTimestamp?.toDate();
+          const dateString = saleDate ? saleDate.toLocaleDateString() : 'N/A';
+          const timeString = saleDate ? saleDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A';
 
-            return (
-              <Marker
-                key={sale.id}
-                coordinate={{
-                  latitude: sale.location.latitude,
-                  longitude: sale.location.longitude,
-                }}
-                title={sale.title}
-              >
-                <Callout>
-                  <View>
-                    <Text style={{ fontWeight: 'bold' }}>{sale.title}</Text>
-                    <Text>{sale.description}</Text>
-                    <Text style={{ fontSize: 10, color: '#888' }}>
-                      {new Date(sale.date).toLocaleString()}
-                    </Text>
-                  </View>
-                </Callout>
-              </Marker>
-            );
-          })}
-        </MapView>
-      ) : (
-        <Text style={styles.loading}>Loading map...</Text>
+          return (
+            <Marker
+              key={sale.id}
+              ref={(el) => (markerRefs.current[sale.id] = el)}
+              coordinate={sale.coordinates}
+              pinColor={selectedSaleId === sale.id ? 'gold' : 'red'}
+              title={sale.title}
+              description={sale.location}
+            >
+              <Callout tooltip>
+                <View style={styles.callout}>
+                  <Text style={styles.calloutTitle}>{sale.title}</Text>
+                  <Text>📍 {sale.location}</Text>
+                  <Text>📅 {dateString}</Text>
+                  <Text>🕒 {timeString}</Text>
+                </View>
+              </Callout>
+            </Marker>
+          );
+        })}
+      </MapView>
+
+      {userLocation && (
+        <TouchableOpacity style={styles.recenterButton} onPress={reCenterMap}>
+          <Ionicons name="locate" size={24} color="#007AFF" />
+        </TouchableOpacity>
       )}
+
+      <FlatList
+        data={sales}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContainer}
+        renderItem={renderSaleItem}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={() => (
+          !loading && <View style={styles.centered}><Text>No sales found.</Text></View>
+        )}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  map: {
-    width: '100%',
-    height: Dimensions.get('window').height,
+  container: {
+    flex: 1,
   },
-  loading: {
+  map: {
+    height: 300,
+    width: '100%',
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    backgroundColor: '#f8f8f8',
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginHorizontal: 5,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 20,
+  },
+  activeFilter: {
+    backgroundColor: '#007AFF',
+  },
+  filterText: {
+    color: 'black',
+  },
+  recenterButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 8,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  centered: {
     flex: 1,
     justifyContent: 'center',
-    textAlign: 'center',
-    paddingTop: 40,
-    fontSize: 18,
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#555',
+  },
+  callout: {
+    width: 250,
+    padding: 8,
+    backgroundColor: 'white',
+    borderRadius: 6,
+  },
+  calloutTitle: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  listContainer: {
+    padding: 16,
+    paddingBottom: 60,
+  },
+  listItem: {
+    backgroundColor: '#f0f0f0',
+    padding: 14,
+    marginBottom: 10,
+    borderRadius: 8,
+  },
+  title: {
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  text: {
+    fontSize: 14,
+    marginTop: 2,
   },
 });

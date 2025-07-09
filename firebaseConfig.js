@@ -4,15 +4,23 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { initializeAuth, getReactNativePersistence } from 'firebase/auth/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  FIREBASE_API_KEY,
+  FIREBASE_AUTH_DOMAIN,
+  FIREBASE_PROJECT_ID,
+  FIREBASE_STORAGE_BUCKET,
+  FIREBASE_MESSAGING_SENDER_ID,
+  FIREBASE_APP_ID,
+} from '@env';
 
 // Only import this on React Native (not web)
 const firebaseConfig = {
-  apiKey: "AIzaSyBBQJdkawY2qNJ26EhlChRaHokOF8kjrqk",
-  authDomain: "yardradar-bca54.firebaseapp.com",
-  projectId: "yardradar-bca54",
-  storageBucket: "yardradar-bca54.appspot.com",
-  messagingSenderId: "1077000204968",
-  appId: "1:1077000204968:web:53ed0937f1112d711a889d"
+  apiKey: FIREBASE_API_KEY,
+  authDomain: FIREBASE_AUTH_DOMAIN,
+  projectId: FIREBASE_PROJECT_ID,
+  storageBucket: FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: FIREBASE_MESSAGING_SENDER_ID,
+  appId: FIREBASE_APP_ID,
 };
 
 // Initialize the core app

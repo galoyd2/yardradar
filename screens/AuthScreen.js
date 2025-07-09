@@ -14,7 +14,7 @@ import { auth } from '../firebaseConfig';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword
-} from 'firebase/auth';
+} from 'firebase/auth/react-native';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -117,4 +117,3 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
-

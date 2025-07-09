@@ -19,6 +19,14 @@ export default function HomeScreen({ navigation }) {
       >
         <Text style={styles.buttonText}>📍 Post a Yard Sale</Text>
       </TouchableOpacity>
+      
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => navigation.navigate('My Listings')}
+      >
+        <Text style={styles.buttonText}>📋 View My Listings</Text>
+      </TouchableOpacity>
+
     </View>
   );
 }
