@@ -69,29 +69,31 @@ export default function FindSalesScreen() {
   // This function is wrapped in useCallback to prevent it from being recreated on every render,
   // which would cause an infinite loop in the useEffect that depends on it.
   // Fixed fetchSales function
-    const fetchSales = useCallback(async () => {
+    // Fixed fetchSales function
+  const fetchSales = useCallback(async () => {
     setLoading(true);
     try {
       const salesRef = collection(db, 'sales');
-      const q = query(salesRef, where('hasCoordinates', '==', true));
-      
-      const snapshot = await getDocs(q);
-      let salesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      // Filter in JavaScript instead of Firestore
+      let q = query(salesRef, where('hasCoordinates', '==', true));
+
       if (dateFilter === 'today') {
         const start = new Date();
         start.setHours(0, 0, 0, 0);
         const end = new Date(start);
         end.setDate(end.getDate() + 1);
         
-        salesData = salesData.filter(sale => {
-          if (!sale.saleTimestamp) return false;
-          const saleDate = sale.saleTimestamp.toDate();
-          return saleDate >= start && saleDate < end;
-        });
+        // Use Firestore Timestamp for comparison
+        const startTimestamp = Timestamp.fromDate(start);
+        const endTimestamp = Timestamp.fromDate(end);
+        
+        q = query(q, 
+          where('saleTimestamp', '>=', startTimestamp), 
+          where('saleTimestamp', '<', endTimestamp)
+        );
       }
-      
+
+      const snapshot = await getDocs(q);
+      const salesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setSales(salesData);
     } catch (err) {
       console.error('Error fetching sales:', err);
