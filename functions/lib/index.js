@@ -1,11 +1,17 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onRequest } = require('firebase-functions/v2/https');
+const { onDocumentCreated, onDocumentDeleted } = require('firebase-functions/v2/firestore');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { getFirestore, Timestamp, FieldValue } = require('firebase-admin/firestore');
+const { getStorage } = require('firebase-admin/storage');
+const { geohashQueryBounds, distanceBetween } = require('geofire-common');
 
 // Initialize Firebase Admin
 initializeApp();
 const db = getFirestore();
+
+const NEARBY_RADIUS_MILES = 15;
+const NEARBY_RADIUS_M = NEARBY_RADIUS_MILES * 1609.34;
 
 // Function that runs every day at 2 AM to delete expired sales
 exports.deleteExpiredSales = onSchedule('0 2 * * *', async (event) => {
@@ -81,4 +87,98 @@ exports.manualCleanup = onRequest(async (req, res) => {
     console.error('Error in manual cleanup:', error);
     res.status(500).json({ error: error.message });
   }
+});
+// ---------------------------------------------------------------------------
+// Push a notification to every user within 15 miles when a sale is posted.
+// Users' tokens + locations are saved by utils/notifications.js in the app.
+// ---------------------------------------------------------------------------
+exports.notifyNearbySale = onDocumentCreated('sales/{saleId}', async (event) => {
+  const sale = event.data?.data();
+  if (!sale?.coordinates) return null;
+
+  // Don't announce sales that are already over
+  if (sale.saleTimestamp && sale.saleTimestamp.toDate() < new Date()) return null;
+
+  const center = [sale.coordinates.latitude, sale.coordinates.longitude];
+  const bounds = geohashQueryBounds(center, NEARBY_RADIUS_M);
+
+  const snapshots = await Promise.all(
+    bounds.map(([start, end]) =>
+      db.collection('users').orderBy('geohash').startAt(start).endAt(end).get()
+    )
+  );
+
+  // Geohash boxes overshoot the circle, so filter by real distance
+  const recipients = new Map(); // token -> uid (dedupes users seen in two boxes)
+  for (const snap of snapshots) {
+    for (const doc of snap.docs) {
+      const u = doc.data();
+      if (doc.id === sale.userId) continue; // don't notify the poster
+      if (!u.expoPushToken || u.notifyNearby === false) continue;
+      const km = distanceBetween([u.lat, u.lng], center);
+      if (km * 1000 <= NEARBY_RADIUS_M) recipients.set(u.expoPushToken, doc.id);
+    }
+  }
+  if (recipients.size === 0) {
+    console.log(`No users within ${NEARBY_RADIUS_MILES} mi of sale ${event.params.saleId}`);
+    return null;
+  }
+
+  const when = sale.saleTimestamp
+    ? sale.saleTimestamp.toDate().toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York',
+      })
+    : '';
+  const tokens = [...recipients.keys()];
+  const messages = tokens.map((to) => ({
+    to,
+    channelId: 'nearby-sales',
+    sound: 'default',
+    title: '📍 New yard sale nearby',
+    body: when ? `${sale.title} · ${when}` : sale.title,
+    data: { type: 'nearby-sale', saleId: event.params.saleId },
+  }));
+
+  // Expo accepts up to 100 messages per request
+  const staleUids = [];
+  for (let i = 0; i < messages.length; i += 100) {
+    const chunk = messages.slice(i, i + 100);
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(chunk),
+    });
+    const json = await res.json();
+    (json.data || []).forEach((ticket, j) => {
+      if (ticket.status === 'error') {
+        console.warn('Push error:', ticket.message, ticket.details);
+        if (ticket.details?.error === 'DeviceNotRegistered') {
+          staleUids.push(recipients.get(chunk[j].to));
+        }
+      }
+    });
+  }
+
+  // Forget tokens for uninstalled apps
+  await Promise.all(
+    staleUids.map((uid) =>
+      db.collection('users').doc(uid).update({ expoPushToken: FieldValue.delete() })
+    )
+  );
+
+  console.log(`Notified ${tokens.length} users about sale ${event.params.saleId}`);
+  return null;
+});
+
+// ---------------------------------------------------------------------------
+// Delete a sale's photos from Storage when the sale is deleted
+// (covers both "delete" in My Listings and the nightly expired-sale cleanup).
+// ---------------------------------------------------------------------------
+exports.cleanupSalePhotos = onDocumentDeleted('sales/{saleId}', async (event) => {
+  const sale = event.data?.data();
+  if (!sale?.userId) return null;
+  const prefix = `sales/${sale.userId}/${event.params.saleId}/`;
+  await getStorage().bucket().deleteFiles({ prefix });
+  console.log(`Deleted photos under ${prefix}`);
+  return null;
 });

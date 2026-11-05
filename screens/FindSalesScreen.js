@@ -8,6 +8,9 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  Image,
+  ScrollView,
+  Modal,
 } from 'react-native';
 import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -26,6 +29,7 @@ export default function FindSalesScreen() {
   const [selectedSaleId, setSelectedSaleId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', 'weekend'
+  const [viewerPhoto, setViewerPhoto] = useState(null); // full-screen photo URL
 
   useEffect(() => {
     let isMounted = true;
@@ -182,6 +186,15 @@ export default function FindSalesScreen() {
           <Text style={styles.text}>📍 {item.location}</Text>
           <Text style={styles.text}>📅 {dateString}</Text>
           <Text style={styles.text}>🕒 {timeString}</Text>
+          {item.photos?.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
+              {item.photos.map((photo) => (
+                <TouchableOpacity key={photo.path} onPress={() => setViewerPhoto(photo.url)}>
+                  <Image source={{ uri: photo.url }} style={styles.thumb} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -255,6 +268,12 @@ export default function FindSalesScreen() {
           !loading && <View style={styles.centered}><Text>No sales found.</Text></View>
         )}
       />
+
+      <Modal visible={!!viewerPhoto} transparent animationType="fade" onRequestClose={() => setViewerPhoto(null)}>
+        <TouchableOpacity style={styles.viewer} activeOpacity={1} onPress={() => setViewerPhoto(null)}>
+          {viewerPhoto && <Image source={{ uri: viewerPhoto }} style={styles.viewerImage} resizeMode="contain" />}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -344,5 +363,25 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 14,
     marginTop: 2,
+  },
+  photoRow: {
+    marginTop: 10,
+  },
+  thumb: {
+    width: 80,
+    height: 80,
+    borderRadius: 6,
+    marginRight: 8,
+    backgroundColor: '#ddd',
+  },
+  viewer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '80%',
   },
 });

@@ -25,7 +25,8 @@
         "googleMaps": {
           "apiKey": "AIzaSyBoWnaG30UR-6ztRcr5jOcg8uvYk5GzVlo"
         }
-      }
+      },
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -34,6 +35,21 @@
       "eas": {
         "projectId": "bd926441-debb-41e2-bccb-4d8c8bf6c85d"
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#4A90E2"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "YardRadar needs access to your photos so you can add pictures to your sale.",
+          "cameraPermission": "YardRadar needs camera access so you can take pictures for your sale."
+        }
+      ]
+    ]
   }
 }

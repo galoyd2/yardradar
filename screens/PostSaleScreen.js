@@ -11,11 +11,13 @@ import {
   FlatList,
   SafeAreaView,
   StatusBar,
+  Image,
+  ScrollView,
 } from 'react-native';
 import {
   collection,
-  addDoc,
   doc,
+  setDoc,
   updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -25,8 +27,13 @@ import { GOOGLE_MAPS_API_KEY } from '@env';
 import axios from 'axios';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-
-console.log('Google Maps Key:', GOOGLE_MAPS_API_KEY);
+import {
+  MAX_PHOTOS,
+  pickPhotos,
+  takePhoto,
+  uploadSalePhoto,
+  deleteSalePhoto,
+} from '../utils/photos';
 
 export default function PostSaleScreen({ navigation, route }) {
   const { editData } = route.params || {};
@@ -46,6 +53,35 @@ export default function PostSaleScreen({ navigation, route }) {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [addressSuggestions, setAddressSuggestions] = useState([]);
+  // Photos already saved on the sale: [{ url, path }]
+  const [existingPhotos, setExistingPhotos] = useState(editData?.photos || []);
+  // Photos removed during this edit; deleted from Storage on save
+  const [removedPhotos, setRemovedPhotos] = useState([]);
+  // Local URIs picked but not yet uploaded
+  const [newPhotoUris, setNewPhotoUris] = useState([]);
+  const [saveStatus, setSaveStatus] = useState('');
+
+  const photoCount = existingPhotos.length + newPhotoUris.length;
+  const remainingPhotos = MAX_PHOTOS - photoCount;
+
+  const addPhotos = async (source) => {
+    try {
+      const uris = source === 'camera' ? await takePhoto() : await pickPhotos(remainingPhotos);
+      if (uris.length) setNewPhotoUris((prev) => [...prev, ...uris].slice(0, MAX_PHOTOS - existingPhotos.length));
+    } catch (err) {
+      console.error('Photo pick error:', err);
+      Alert.alert('Error', 'Could not add that photo.');
+    }
+  };
+
+  const removeExistingPhoto = (photo) => {
+    setExistingPhotos((prev) => prev.filter((p) => p.path !== photo.path));
+    setRemovedPhotos((prev) => [...prev, photo]);
+  };
+
+  const removeNewPhoto = (uri) => {
+    setNewPhotoUris((prev) => prev.filter((u) => u !== uri));
+  };
 
   useEffect(() => {
     navigation.setOptions({
@@ -59,32 +95,6 @@ export default function PostSaleScreen({ navigation, route }) {
       },
     });
   }, [navigation, isEditMode]);
-
-  useEffect(() => {
-    const testGooglePlacesAPI = async () => {
-      try {
-        const res = await axios.get(
-          `https://maps.googleapis.com/maps/api/place/autocomplete/json`,
-          {
-            params: {
-              input: '123 Main St',
-              key: GOOGLE_MAPS_API_KEY,
-              types: 'address',
-              language: 'en',
-            },
-          }
-        );
-        console.log('✅ Google Places test:', res.data);
-        if (res.data.error_message) {
-          console.warn('⚠️ Google API error:', res.data.error_message);
-        }
-      } catch (error) {
-        console.error('❌ Axios error:', error.message);
-      }
-    };
-
-    testGooglePlacesAPI();
-  }, []);
 
   const searchAddresses = async (input) => {
     try {
@@ -163,6 +173,12 @@ export default function PostSaleScreen({ navigation, route }) {
       return;
     }
 
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      Alert.alert('Not signed in', 'Please sign in again to post a sale.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const combinedDateTime = new Date(saleDetails.date);
@@ -175,15 +191,30 @@ export default function PostSaleScreen({ navigation, route }) {
         saleTimestamp: combinedDateTime,
         coordinates: coordinates,
         hasCoordinates: true,
-        userId: auth.currentUser?.uid || null,
+        userId,
       };
 
+      // Get the doc ref first so photos can be uploaded under the sale's ID
+      // before the sale doc is created (the push notification fires on create).
+      const saleDocRef = isEditMode
+        ? doc(db, 'sales', editData.id)
+        : doc(collection(db, 'sales'));
+
+      const uploaded = [];
+      for (let i = 0; i < newPhotoUris.length; i++) {
+        setSaveStatus(`Uploading photo ${i + 1} of ${newPhotoUris.length}...`);
+        uploaded.push(await uploadSalePhoto(newPhotoUris[i], userId, saleDocRef.id));
+      }
+      setSaveStatus('');
+      saleData.photos = [...existingPhotos, ...uploaded];
+
       if (isEditMode) {
-        const saleDocRef = doc(db, 'sales', editData.id);
         await updateDoc(saleDocRef, saleData);
+        // Only delete removed photos once the doc no longer points at them
+        await Promise.all(removedPhotos.map((p) => deleteSalePhoto(p.path).catch(() => {})));
         Alert.alert('Success', 'Sale updated!');
       } else {
-        await addDoc(collection(db, 'sales'), {
+        await setDoc(saleDocRef, {
           ...saleData,
           createdAt: serverTimestamp(),
         });
@@ -196,6 +227,7 @@ export default function PostSaleScreen({ navigation, route }) {
       Alert.alert('Error', `Failed to ${isEditMode ? 'update' : 'post'} sale. Please try again.`);
     } finally {
       setIsSaving(false);
+      setSaveStatus('');
     }
   };
 
@@ -250,6 +282,45 @@ export default function PostSaleScreen({ navigation, route }) {
               placeholderTextColor="#999"
               textAlignVertical="top"
             />
+          </View>
+
+          {/* Photos Field */}
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>
+              <Ionicons name="images" size={16} color="#4A90E2" /> Photos ({photoCount}/{MAX_PHOTOS})
+            </Text>
+            {photoCount > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
+                {existingPhotos.map((photo) => (
+                  <View key={photo.path} style={styles.photoWrap}>
+                    <Image source={{ uri: photo.url }} style={styles.photo} />
+                    <TouchableOpacity style={styles.photoRemove} onPress={() => removeExistingPhoto(photo)}>
+                      <Ionicons name="close" size={16} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {newPhotoUris.map((uri) => (
+                  <View key={uri} style={styles.photoWrap}>
+                    <Image source={{ uri }} style={styles.photo} />
+                    <TouchableOpacity style={styles.photoRemove} onPress={() => removeNewPhoto(uri)}>
+                      <Ionicons name="close" size={16} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+            {remainingPhotos > 0 && (
+              <View style={styles.photoButtons}>
+                <TouchableOpacity style={styles.photoButton} onPress={() => addPhotos('library')}>
+                  <Ionicons name="images-outline" size={20} color="#4A90E2" />
+                  <Text style={styles.photoButtonText}>Choose Photos</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.photoButton} onPress={() => addPhotos('camera')}>
+                  <Ionicons name="camera-outline" size={20} color="#4A90E2" />
+                  <Text style={styles.photoButtonText}>Take Photo</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
 
           {/* Address Field */}
@@ -347,7 +418,7 @@ export default function PostSaleScreen({ navigation, route }) {
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#4A90E2" />
               <Text style={styles.loadingText}>
-                {isEditMode ? 'Updating sale...' : 'Posting sale...'}
+                {saveStatus || (isEditMode ? 'Updating sale...' : 'Posting sale...')}
               </Text>
             </View>
           ) : (
@@ -461,6 +532,51 @@ const styles = StyleSheet.create({
   textArea: {
     height: 100,
     textAlignVertical: 'top',
+  },
+  photoRow: {
+    marginBottom: 12,
+  },
+  photoWrap: {
+    marginRight: 10,
+  },
+  photo: {
+    width: 96,
+    height: 96,
+    borderRadius: 10,
+    backgroundColor: '#E1E8ED',
+  },
+  photoRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  photoButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#E1E8ED',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  photoButtonText: {
+    marginLeft: 8,
+    fontSize: 15,
+    color: '#4A90E2',
+    fontWeight: '600',
   },
   dateTimeButton: {
     flexDirection: 'row',
