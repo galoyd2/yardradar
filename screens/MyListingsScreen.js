@@ -8,6 +8,7 @@ import { db, auth } from '../firebaseConfig';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { shareSale } from '../utils/share';
 
 export default function MyListingsScreen() {
   const [mySales, setMySales] = useState([]);
@@ -200,6 +201,15 @@ export default function MyListingsScreen() {
         </View>
 
         <View style={styles.buttonRow}>
+          <TouchableOpacity
+            onPress={() => shareSale(item)}
+            style={styles.editButton}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="share-social-outline" size={16} color="#4A90E2" />
+            <Text style={styles.editButtonText}>Share</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={() => navigation.navigate('Post Sale', { editData: item })}
             style={styles.editButton}

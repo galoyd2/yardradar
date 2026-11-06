@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { shareSale } from '../utils/share';
 
 export default function FindSalesScreen() {
   const [sales, setSales] = useState([]);
@@ -168,7 +169,16 @@ export default function FindSalesScreen() {
     return (
       <TouchableOpacity onPress={() => handleListItemPress(item)}>
         <View style={styles.listItem}>
-          <Text style={styles.title}>{item.title}</Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.title, { flex: 1 }]}>{item.title}</Text>
+            <TouchableOpacity
+              onPress={() => shareSale(item)}
+              style={styles.shareButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="share-social-outline" size={20} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
           <Text style={styles.text}>📍 {item.location}</Text>
           <Text style={styles.text}>📅 {dateString}</Text>
           <Text style={styles.text}>🕒 {timeString}</Text>
@@ -323,6 +333,13 @@ const styles = StyleSheet.create({
   title: {
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  shareButton: {
+    paddingLeft: 12,
   },
   text: {
     fontSize: 14,
