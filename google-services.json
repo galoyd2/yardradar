@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1077000204968",
+    "project_id": "yardradar-bca54",
+    "storage_bucket": "yardradar-bca54.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1077000204968:android:2b4b0fba8ae10b5c1a889d",
+        "android_client_info": {
+          "package_name": "com.yardradar.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDiZwsdMlHbr7hvAqAntWTSAIVCvIHwP5I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -21,12 +21,14 @@
       },
       "package": "com.yardradar.app",
       "versionCode": 3,
+      "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyBoWnaG30UR-6ztRcr5jOcg8uvYk5GzVlo"
         }
       }
     },
+    "plugins": [["expo-notifications", { "color": "#4A90E2" }]],
     "web": {
       "favicon": "./assets/favicon.png"
     },
