@@ -8,12 +8,16 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  Image,
+  ScrollView,
+  Modal,
 } from 'react-native';
 import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { shareSale } from '../utils/share';
 
 export default function FindSalesScreen() {
   const [sales, setSales] = useState([]);
@@ -25,6 +29,7 @@ export default function FindSalesScreen() {
   const [selectedSaleId, setSelectedSaleId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', 'weekend'
+  const [viewerPhoto, setViewerPhoto] = useState(null); // full-screen photo URL
 
   useEffect(() => {
     let isMounted = true;
@@ -168,10 +173,28 @@ export default function FindSalesScreen() {
     return (
       <TouchableOpacity onPress={() => handleListItemPress(item)}>
         <View style={styles.listItem}>
-          <Text style={styles.title}>{item.title}</Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.title, { flex: 1 }]}>{item.title}</Text>
+            <TouchableOpacity
+              onPress={() => shareSale(item)}
+              style={styles.shareButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="share-social-outline" size={20} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
           <Text style={styles.text}>📍 {item.location}</Text>
           <Text style={styles.text}>📅 {dateString}</Text>
           <Text style={styles.text}>🕒 {timeString}</Text>
+          {item.photos?.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
+              {item.photos.map((photo) => (
+                <TouchableOpacity key={photo.path} onPress={() => setViewerPhoto(photo.url)}>
+                  <Image source={{ uri: photo.url }} style={styles.thumb} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -245,6 +268,12 @@ export default function FindSalesScreen() {
           !loading && <View style={styles.centered}><Text>No sales found.</Text></View>
         )}
       />
+
+      <Modal visible={!!viewerPhoto} transparent animationType="fade" onRequestClose={() => setViewerPhoto(null)}>
+        <TouchableOpacity style={styles.viewer} activeOpacity={1} onPress={() => setViewerPhoto(null)}>
+          {viewerPhoto && <Image source={{ uri: viewerPhoto }} style={styles.viewerImage} resizeMode="contain" />}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -324,8 +353,35 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  shareButton: {
+    paddingLeft: 12,
+  },
   text: {
     fontSize: 14,
     marginTop: 2,
+  },
+  photoRow: {
+    marginTop: 10,
+  },
+  thumb: {
+    width: 80,
+    height: 80,
+    borderRadius: 6,
+    marginRight: 8,
+    backgroundColor: '#ddd',
+  },
+  viewer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '80%',
   },
 });

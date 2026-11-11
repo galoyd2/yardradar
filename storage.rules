@@ -1,0 +1,24 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Sale photos: sales/{userId}/{saleId}/{file}
+    match /sales/{userId}/{saleId}/{fileName} {
+      // Anyone can view sale photos (they're shown on public listings)
+      allow read: if true;
+
+      // Only the signed-in owner can upload, images only, max 5 MB each
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.contentType.matches('image/.*')
+                    && request.resource.size < 5 * 1024 * 1024;
+
+      // Only the owner can delete their own photos
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Everything else is locked down
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

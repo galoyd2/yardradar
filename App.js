@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { auth } from './firebaseConfig';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
+import { auth } from './firebaseConfig';
 import { registerForNearbySaleAlerts } from './utils/notifications';
 
 import HomeScreen from './screens/HomeScreen';
@@ -28,20 +28,20 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Register whenever someone is signed in
-useEffect(() => {
-  if (user) registerForNearbySaleAlerts(user.uid);
-}, [user]);
+  // Save push token + location whenever someone is signed in
+  useEffect(() => {
+    if (user) registerForNearbySaleAlerts(user.uid);
+  }, [user]);
 
-// Tapping a notification opens Find Sales
-const lastResponse = Notifications.useLastNotificationResponse();
-useEffect(() => {
-  if (!user || !lastResponse) return;
-  if (lastResponse.notification.request.content.data?.type !== 'nearby-sale') return;
-  const go = () => navigationRef.isReady() && navigationRef.navigate('Find Sales');
-  if (navigationRef.isReady()) go();
-  else setTimeout(go, 500);
-}, [lastResponse, user]);
+  // Tapping a "sale nearby" notification opens Find Sales
+  const lastResponse = Notifications.useLastNotificationResponse();
+  useEffect(() => {
+    if (!user || !lastResponse) return;
+    if (lastResponse.notification.request.content.data?.type !== 'nearby-sale') return;
+    const go = () => navigationRef.isReady() && navigationRef.navigate('Find Sales');
+    if (navigationRef.isReady()) go();
+    else setTimeout(go, 500);
+  }, [lastResponse, user]);
 
   if (checking) {
     return (
