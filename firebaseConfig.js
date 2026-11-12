@@ -11,7 +11,8 @@ import {
   FIREBASE_STORAGE_BUCKET,
   FIREBASE_MESSAGING_SENDER_ID,
   FIREBASE_APP_ID,
-} from '@env';
+} from '@env'; 
+import { getFunctions } from 'firebase/functions';
 
 // Only import this on React Native (not web)
 const firebaseConfig = {
@@ -34,5 +35,6 @@ const auth = initializeAuth(app, {
 // Other services
 const db = getFirestore(app);
 const storage = getStorage(app);
+const functions = getFunctions(app); // us-central1 by default
 
-export { app, auth, db, storage };
+export { app, auth, db, storage, functions };

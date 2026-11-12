@@ -1,14 +1,16 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { onRequest } = require('firebase-functions/v2/https');
+const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated, onDocumentDeleted } = require('firebase-functions/v2/firestore');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldValue } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 const { geohashQueryBounds, distanceBetween } = require('geofire-common');
+const { getAuth } = require('firebase-admin/auth');
 
 // Initialize Firebase Admin
 initializeApp();
 const db = getFirestore();
+const auth = getAuth();
 
 const NEARBY_RADIUS_MILES = 15;
 const NEARBY_RADIUS_M = NEARBY_RADIUS_MILES * 1609.34;
@@ -181,4 +183,23 @@ exports.cleanupSalePhotos = onDocumentDeleted('sales/{saleId}', async (event) =>
   await getStorage().bucket().deleteFiles({ prefix });
   console.log(`Deleted photos under ${prefix}`);
   return null;
+});
+exports.deleteAccount = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'You must be signed in.');
+
+  // 1. Their sales (cleanupSalePhotos also fires for each one)
+  const sales = await db.collection('sales').where('userId', '==', uid).get();
+  const batch = db.batch();
+  sales.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(db.collection('users').doc(uid)); // 2. location, token, blocks
+  await batch.commit();
+
+  // 3. Any photos left behind
+  await getStorage().bucket().deleteFiles({ prefix: `sales/${uid}/` });
+
+  // 4. The login itself
+  await getAuth().deleteUser(uid);
+
+  return { ok: true };
 });
