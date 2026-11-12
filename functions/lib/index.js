@@ -1,9 +1,10 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { onRequest } = require('firebase-functions/v2/https');
+const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated, onDocumentDeleted } = require('firebase-functions/v2/firestore');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldValue } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
+const { getAuth } = require('firebase-admin/auth');
 const { geohashQueryBounds, distanceBetween } = require('geofire-common');
 
 // Initialize Firebase Admin
@@ -181,4 +182,29 @@ exports.cleanupSalePhotos = onDocumentDeleted('sales/{saleId}', async (event) =>
   await getStorage().bucket().deleteFiles({ prefix });
   console.log(`Deleted photos under ${prefix}`);
   return null;
+});
+
+// ---------------------------------------------------------------------------
+// Delete the caller's account and everything they own.
+// Called from the app's "Delete account" button (required by Google Play).
+// ---------------------------------------------------------------------------
+exports.deleteAccount = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'You must be signed in.');
+
+  // 1. Their sales (cleanupSalePhotos also fires for each one)
+  const sales = await db.collection('sales').where('userId', '==', uid).get();
+  const batch = db.batch();
+  sales.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(db.collection('users').doc(uid)); // 2. Profile: location, push token, blocks
+  await batch.commit();
+
+  // 3. Any photos left behind
+  await getStorage().bucket().deleteFiles({ prefix: `sales/${uid}/` });
+
+  // 4. The login itself
+  await getAuth().deleteUser(uid);
+
+  console.log(`Deleted account ${uid} (${sales.size} sales)`);
+  return { ok: true };
 });

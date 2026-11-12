@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar } fro
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import YardRadarIcon from '../components/YardRadarIcon'; // Import your custom icon
+import { confirmDeleteAccount } from '../utils/moderation';
 
 export default function HomeScreen({ navigation }) {
   return (
@@ -74,6 +75,9 @@ export default function HomeScreen({ navigation }) {
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Start exploring your local community</Text>
+          <TouchableOpacity onPress={confirmDeleteAccount} style={{ marginTop: 16 }}>
+            <Text style={styles.deleteAccountText}>Delete account</Text>
+          </TouchableOpacity>
         </View>
       </LinearGradient>
     </SafeAreaView>
@@ -81,6 +85,12 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  deleteAccountText: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 13,
+    textDecorationLine: 'underline',
+    textAlign: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#4A90E2',

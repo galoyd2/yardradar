@@ -18,6 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { shareSale } from '../utils/share';
+import { auth } from '../firebaseConfig';
+import { getBlockedUsers, showSaleOptions } from '../utils/moderation';
 
 export default function FindSalesScreen() {
   const [sales, setSales] = useState([]);
@@ -99,7 +101,8 @@ export default function FindSalesScreen() {
 
       const snapshot = await getDocs(q);
       const salesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSales(salesData);
+      const blocked = await getBlockedUsers();
+      setSales(salesData.filter((s) => !blocked.includes(s.userId)));
     } catch (err) {
       console.error('Error fetching sales:', err);
       Alert.alert('Error', 'Could not fetch sales data.');
@@ -182,6 +185,20 @@ export default function FindSalesScreen() {
             >
               <Ionicons name="share-social-outline" size={20} color="#007AFF" />
             </TouchableOpacity>
+            {item.userId !== auth.currentUser?.uid && (
+              <TouchableOpacity
+                onPress={() =>
+                  showSaleOptions(item, {
+                    onSellerHidden: (sellerId) =>
+                      setSales((prev) => prev.filter((s) => s.userId !== sellerId)),
+                  })
+                }
+                style={styles.shareButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="ellipsis-vertical" size={20} color="#666" />
+              </TouchableOpacity>
+            )}
           </View>
           <Text style={styles.text}>📍 {item.location}</Text>
           <Text style={styles.text}>📅 {dateString}</Text>
