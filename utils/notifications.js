@@ -59,7 +59,10 @@ async function getRoughLocation() {
 // Call on every app open while signed in. Failures are non-fatal.
 export async function registerForNearbySaleAlerts(uid) {
   try {
-    const [token, loc] = await Promise.all([getPushToken(), getRoughLocation()]);
+    // One at a time: Android can only show one permission dialog at once,
+    // and asking for both together can leave one request hanging forever.
+    const token = await getPushToken();
+    const loc = await getRoughLocation();
     const update = { updatedAt: serverTimestamp() };
     if (token) update.expoPushToken = token;
     if (loc) {
