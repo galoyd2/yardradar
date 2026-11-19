@@ -20,7 +20,7 @@
         "backgroundColor": "#4A90E2"
       },
       "package": "com.yardradar.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyBoWnaG30UR-6ztRcr5jOcg8uvYk5GzVlo"
